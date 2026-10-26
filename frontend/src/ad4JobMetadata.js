@@ -90,3 +90,21 @@ export function captureAd4PlateThumbnail(plate = 0) {
     return null
   }
 }
+
+/** Keep the uploaded STL/3MF/OBJ base name when sending a sliced printer job.
+ * Multi-object plates use the first real source name plus the object count.
+ * No anonymous "three-slicer" name is fabricated when the source is unknown.
+ */
+export function slicerJobFilename(rows, plate = 0) {
+  if (!Array.isArray(rows)) return null
+  const names = [...new Set(rows
+    .filter(row => row && row.visible !== false && Number(row.plate ?? 0) === Number(plate))
+    .map(row => String(row.name || '').split(/[\\/]/).pop())
+    .filter(Boolean)
+    .map(name => name.replace(/\.[^.]+$/, '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[_\-.]+|[_\-.]+$/g, ''))
+    .filter(Boolean))]
+  if (!names.length) return null
+  const base = names.length === 1 ? names[0] : `${names[0]}_plus_${names.length - 1}_models`
+  return base.slice(0, 100).replace(/[_\-.]+$/, '') + '.gcode'
+}

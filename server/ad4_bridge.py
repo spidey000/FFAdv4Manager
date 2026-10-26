@@ -15,7 +15,7 @@ import sys
 import tempfile
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 if __package__:
     from .cloudflare_access import load_access_config, verify_access_jwt, _jwks_client
@@ -236,14 +236,27 @@ class Handler(SimpleHTTPRequestHandler):
                 data = self.rfile.read(size)
                 if len(data) != size or not data.strip(b'\x00\r\n\t '):
                     raise ValueError('Archivo vacío o incompleto')
-                name = 'three-slicer-ad4.gcode' if legacy else safe_filename(
-                    unquote(parse_qs(url.query).get('name', [''])[0]))
+                # Preserve the real source name supplied by the slicer or file picker.
+                # Never silently replace an uploaded model with a generic filename.
+                try:
+                    name = safe_filename(parse_qs(url.query).get('name', [''])[0])
+                except ValueError as exc:
+                    return self.json(400, {'error': str(exc)})
                 start = parse_qs(url.query).get('start', ['false'])[0] == 'true'
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / name
                     filename.write_bytes(data)
                     output = command('upload', str(filename), *(['--start'] if start else []), timeout=3600)
-                return self.json(200, {'remote_name': name, 'started': start, 'detail': output[-1000:]})
+                # The CLI chooses the printer filename using GX header metadata;
+                # report the actual destination returned by the CLI, not the
+                # temporary name used to pass the file to the converter.
+                match = re.search(r'Uploaded and listed:\\s*([^\\r\\n]+)', output)
+                if not match:
+                    raise RuntimeError('The CLI did not report a confirmed remote upload')
+                remote_path = match.group(1).strip()
+                return self.json(200, {'remote_name': remote_path.rsplit('/', 1)[-1],
+                                       'remote_path': remote_path, 'started': start,
+                                       'detail': output[-1000:]})
             body = self.data()
             if not isinstance(body, dict):
                 raise ValueError('Formato JSON no válido')
