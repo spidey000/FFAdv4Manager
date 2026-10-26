@@ -882,6 +882,10 @@ def _encode_timelapse(directory: Path) -> None:
     ], cwd=directory, capture_output=True, text=True, timeout=120, check=False)
     if result.returncode or not (directory / "timelapse.mp4").is_file():
         raise RuntimeError("ffmpeg failed to create MP4: " + result.stderr[-400:])
+    # Keep only the compressed video and the small JSONL metadata after a
+    # successful conversion. Preserve JPEGs when ffmpeg fails for recovery.
+    for frame in frames:
+        frame.unlink()
     print(f"MP4: {directory / 'timelapse.mp4'}", flush=True)
 
 
@@ -943,8 +947,9 @@ def _capture_timelapse(client, args, host: str, url: str | None = None) -> int:
                     break
                 elif not started_printing and time.monotonic() >= startup_deadline:
                     raise RuntimeError("print did not start within 120 seconds")
-                if args.job_name and status.is_printing and status.current_file:
-                    if Path(status.current_file).name.casefold() != Path(args.job_name).name.casefold():
+                if args.job_name and status.is_printing:
+                    if (not status.current_file or
+                            Path(status.current_file).name.casefold() != Path(args.job_name).name.casefold()):
                         raise RuntimeError("active printer file changed; refusing layer captures")
                 if status.is_printing:
                     try:
