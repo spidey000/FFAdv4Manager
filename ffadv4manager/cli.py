@@ -294,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     profile_delete.add_argument("name")
 
     slicer_cmd = sub.add_parser(
-        "slicer", help="Start the loopback Three_Slicer bridge (local or Access-protected)"
+        "slicer", help="Start the integrated web UI and printer API (requires a frontend build)"
     )
     slicer_cmd.add_argument(
         "--require-access",
@@ -329,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_profiles(args)
 
     if args.command == "slicer":
-        from ffadv4manager.slicer_bridge import serve
+        from server.ad4_bridge import serve
 
         try:
             serve(require_access=args.require_access)

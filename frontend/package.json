@@ -1,13 +1,14 @@
 {
-  "name": "three-slicer-responsive-demo",
+  "name": "ffadv4manager-web",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "local": "python3 server/ad4_bridge.py",
+    "local": "python3 ../server/ad4_bridge.py",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "4.3.4",

@@ -25,8 +25,8 @@ else:
 ACCESS_CONFIG = load_access_config(os.environ)
 
 ROOT = Path(__file__).resolve().parents[1]
-DIST = ROOT / 'dist'
-BASE = '/Three_slicer_responsive/'
+DIST = ROOT / 'frontend' / 'dist'
+BASE = '/'
 CLI = os.environ.get('AD4_CLI', 'ffadv4manager')
 HOST = os.environ.get('AD4_HOST')
 MAX_GCODE = 100 * 1024 * 1024
@@ -208,15 +208,10 @@ class Handler(SimpleHTTPRequestHandler):
         except (OSError, RuntimeError, ValueError, TypeError, subprocess.TimeoutExpired,
                 json.JSONDecodeError) as error:
             return self.json(502, {'error': str(error)})
-        if path in ('/', BASE.rstrip('/')):
-            self.send_response(302)
-            self.send_header('Location', BASE)
-            self.end_headers()
-            return
-        if path.startswith(BASE):
-            self.path = '/' + path[len(BASE):]
-            return super().do_GET()
-        self.send_error(404)
+        # Integrated frontend is served at /, and API routes never expose static files.
+        if path.startswith('/api/'):
+            return self.json(404, {'error': 'Unknown API route'})
+        return super().do_GET()
 
     def do_POST(self):
         global TIMELAPSE_DIR
@@ -347,14 +342,30 @@ class Handler(SimpleHTTPRequestHandler):
             return self.json(502, {'error': str(error)})
 
 
-if __name__ == '__main__':
+def serve(*, require_access=False):
+    """Serve the integrated frontend and API on loopback only."""
     if not (DIST / 'index.html').is_file():
-        sys.exit('Missing dist/: run npm run build first')
+        raise RuntimeError('Missing frontend/dist/: run cd frontend && npm ci && npm run build')
+    if require_access and not ACCESS_CONFIG:
+        raise RuntimeError('Cloudflare Access configuration is required')
     if ACCESS_CONFIG:
-        _jwks_client(ACCESS_CONFIG['jwks_url'])  # Fail fast if PyJWT is missing.
+        _jwks_client(ACCESS_CONFIG['jwks_url'])
         print('Cloudflare Access validation enabled: ' + ACCESS_CONFIG['public_origin'], flush=True)
     else:
-        print('Local-only mode: Cloudflare authentication disabled', flush=True)
+        print('Local-only mode: Cloudflare authentication disabled; do NOT publish a Tunnel route', flush=True)
     port = int(os.environ.get('AD4_WEB_PORT', '8765'))
-    print('AD4 web: http://127.0.0.1:' + str(port) + BASE, flush=True)
-    ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()
+    print('FFAdv4Manager: http://127.0.0.1:' + str(port) + '/', flush=True)
+    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == '__main__':
+    try:
+        serve()
+    except (RuntimeError, ValueError) as exc:
+        sys.exit(str(exc))
