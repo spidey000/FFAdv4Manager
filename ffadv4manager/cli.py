@@ -60,6 +60,7 @@ _HELP_TOPICS = {
     "pause": "pause\n  Pause the current print.",
     "resume": "resume\n  Resume the current print.",
     "cancel": "cancel\n  Cancel/reset the current SD print state. This is destructive to the active job.",
+    "slicer": "slicer [--require-access]\n  Serve the built unified web frontend and printer API on 127.0.0.1:8765. For remote Tunnel access, configure Cloudflare Access and require --require-access.",
     "config": "config show | path | set | unset\n  Manage connection and camera defaults locally; these actions do not contact a printer. See `ffadv4manager help config show`, `ffadv4manager help config path`, `ffadv4manager help config set`, or `ffadv4manager help config unset`.",
     "config show": "config show\n  Print stored connection and camera values, or explain that no config is stored. Does not contact a printer.",
     "config path": "config path\n  Print the active config file location. Does not contact a printer.",
@@ -108,6 +109,7 @@ SUPPORTED COMMANDS
   profiles     Manage named local printer profiles.
   printer      Rename the printer-reported name.
   fan          Control the layer/part-cooling fan.
+  slicer       Run the integrated web UI/API (build frontend first).
 
 CONNECTION AND CONFIGURATION
   Options: --host HOST, --port PORT, --timeout SECONDS. Defaults are port {DEFAULT_PORT}
