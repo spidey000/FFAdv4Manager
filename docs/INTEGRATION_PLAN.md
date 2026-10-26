@@ -1,0 +1,39 @@
+# Integration plan and source provenance
+
+## Inputs pinned at the time of consolidation (2026-10-26)
+
+- **CLI source:** [spidey000/FFAD4Manager](https://github.com/spidey000/FFAD4Manager), `main` commit `e6d77d1c5cb4512b768b8aeb8d1fe62e4aa66fb4`.
+- **UI source:** [spidey000/Three_slicer_responsive](https://github.com/spidey000/Three_slicer_responsive), `main` commit `d781f89652ee050952165d9d3b549ceeaf2b8b39`.
+- **Target:** [spidey000/FFAdv4Manager](https://github.com/spidey000/FFAdv4Manager), created initially empty.
+
+This is a **source-code consolidation**, not a Git history graft: upstream Git histories remain in the original repos. Filenames are copied under distinct ownership boundaries and upstream commit IDs are recorded for traceability.
+
+## Steps
+
+1. **Import CLI core**: keep `ffadv4manager/`, `pyproject.toml`, `scripts/orca_ad4_upload.py`, CLI tests and CLI command documentation. Do **not** copy its separate, older `web/` tree (another slicer, not the chosen UI).
+2. **Import current UI**: move React/Vite source to `frontend/`, including tests and dependency lockfile. Keep its license and third-party notices. Use root `/` as production base, not GitHub Pages' historic pathname.
+3. **Canonical bridge**: move the responsive UI's Python `server/` to root, change `DIST` to `frontend/dist`, serve at `/`, preserve supported `/api/printer/*` commands and optional origin Cloudflare JWT validation.
+4. **CLI-to-web linkage**: route `ffadv4manager slicer` to the canonical server, while preserving other command-line commands and legacy bridge source as a reference.
+5. **Single installation**: `pip install -e .` from root, `npm ci && npm run build` from `frontend`, one loopback HTTP process for both frontend and API.
+6. **Secure remote deployment**: protect entire public hostname with Cloudflare Access, then connect Tunnel; keep the origin on loopback and enforce Access JWT at origin.
+7. **Quality gate**: run Python CLI/server tests, Node profile tests and Vite production build. Test static root and protected API without physical commands.
+8. **Real-device acceptance**: separately verify status and camera read-only on an actual Adventurer 4 from LAN/remote session; printing and upload require supervised confirmation.
+
+## Ownership guide
+
+| Area | Canonical owner | Changes should go to |
+| --- | --- | --- |
+| Printer protocol and GX writer | Python CLI | `ffadv4manager/core/` |
+| CLI commands and host config | Python CLI | `ffadv4manager/cli.py`, `config.py`, `profiles.py` |
+| HTTP API / authentication | Python server | `server/` |
+| UI, slicer profiles, buttons and mobile layout | React | `frontend/src/` |
+| Shared integration behavior | Server + UI tests | `tests/server/`, `frontend/tests/` |
+| Deployment documentation | Target repo | Root `README.md`, `docs/DEPLOY_CLOUDFLARE.md` |
+
+## Follow-up backlog
+
+- Add a contract schema between frontend and bridge and an end-to-end headless browser test against a mocked CLI.
+- Add CI dependency audit and dependency-update policy.
+- Add verified GX thumbnail/time metadata based on printer-produced file samples; do not infer undocumented firmware support.
+- Add browser language consistency review for the printer manager without changing existing supported CLI operations.
+- Validate Tunnel/Access integration and a supervised printer upload from the actual server.
