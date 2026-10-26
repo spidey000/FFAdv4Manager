@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-label="Demo 3D printer camera image">
+  <defs>
+    <linearGradient id="bg" x2="0" y2="1"><stop stop-color="#273039"/><stop offset="1" stop-color="#15191e"/></linearGradient>
+    <linearGradient id="print" x2="1" y2="1"><stop stop-color="#b9ee66"/><stop offset="1" stop-color="#62952c"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#95a2ae" stroke-opacity=".16"/></pattern>
+  </defs>
+  <rect width="960" height="540" fill="url(#bg)"/>
+  <rect x="70" y="84" width="820" height="398" rx="12" fill="#12161b" stroke="#58636e" stroke-width="8"/>
+  <path d="M108 420h744l-70 42H178Z" fill="#353f48" stroke="#77838c" stroke-width="3"/>
+  <path d="M108 420h744l-70 42H178Z" fill="url(#grid)"/>
+  <path d="M206 96v304M754 96v304M206 158h548" stroke="#7b8791" stroke-width="18"/>
+  <rect x="418" y="138" width="124" height="58" rx="7" fill="#49545e" stroke="#a7b2bb" stroke-width="4"/>
+  <path d="M457 196h46l-10 62h-26Z" fill="#8e9ca8"/>
+  <path d="M474 258h12l-6 19Z" fill="#d4dce2"/>
+  <path d="M400 386l30-90h100l30 90Z" fill="url(#print)" stroke="#d7f7a5" stroke-width="4"/>
+  <path d="M430 296l18 90M530 296l-18 90M411 356h138" stroke="#477423" stroke-width="3" opacity=".65"/>
+  <circle cx="106" cy="110" r="8" fill="#a7e43d"/>
+  <text x="126" y="116" fill="#dce8d3" font-family="sans-serif" font-size="18">SIMULATED VIEW</text>
+  <g transform="rotate(-17 480 270)"><rect x="145" y="210" width="670" height="114" rx="10" fill="#12161b" fill-opacity=".79" stroke="#e5f7cb" stroke-opacity=".6" stroke-width="2"/>
+    <text x="480" y="283" text-anchor="middle" fill="#d8f79a" font-family="sans-serif" font-size="58" font-weight="800" letter-spacing="7">DEMO IMAGE</text></g>
+</svg>
