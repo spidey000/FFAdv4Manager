@@ -98,16 +98,16 @@ class BridgeChecks(unittest.TestCase):
             self.assertEqual(args[0], 'upload')
             temp = Path(args[1])
             calls.append((temp.name, temp.read_bytes()))
-            return 'uploaded\\nUploaded and listed: 0:/user/01_02_1.23m_Benchy.gx\\n'
+            return 'uploaded\nUploaded and listed: 0:/user/01_02_1.23m_Benchy.gx\n'
 
         url = 'http://127.0.0.1:' + str(self.port) + '/api/printer/jobs?start=false&name=Benchy.gcode'
         headers = {'Origin': 'http://127.0.0.1:' + str(self.port),
                    'Content-Type': 'text/plain; charset=utf-8'}
         with patch.object(bridge, 'command', side_effect=fake_cli):
-            request = Request(url, data=b'G28\\nG1 X10\\n', headers=headers, method='POST')
+            request = Request(url, data=b'G28\nG1 X10\n', headers=headers, method='POST')
             with urlopen(request, timeout=4) as response:
                 result = json.load(response)
-        self.assertEqual(calls, [('Benchy.gcode', b'G28\\nG1 X10\\n')])
+        self.assertEqual(calls, [('Benchy.gcode', b'G28\nG1 X10\n')])
         self.assertEqual(result['remote_name'], '01_02_1.23m_Benchy.gx')
         self.assertEqual(result['remote_path'], '0:/user/01_02_1.23m_Benchy.gx')
         self.assertFalse(result['started'])
@@ -115,16 +115,16 @@ class BridgeChecks(unittest.TestCase):
     def test_uploaded_gx_filename_is_preserved_and_missing_job_name_rejected(self):
         def fake_cli(*args, **kwargs):
             self.assertEqual(Path(args[1]).name, 'my-part.gx')
-            return 'Uploaded and listed: 0:/user/00_33_0.54m_my-part.gx\\n'
+            return 'Uploaded and listed: 0:/user/00_33_0.54m_my-part.gx\n'
 
         base = 'http://127.0.0.1:' + str(self.port)
         headers = {'Origin': base, 'Content-Type': 'application/octet-stream'}
         with patch.object(bridge, 'command', side_effect=fake_cli):
             req = Request(base + '/api/printer/upload?name=my-part.gx',
-                          data=b'xgcode 1.0\\n\\0', headers=headers, method='POST')
+                          data=b'xgcode 1.0\n\0', headers=headers, method='POST')
             with urlopen(req, timeout=4) as response:
                 self.assertEqual(json.load(response)['remote_name'], '00_33_0.54m_my-part.gx')
-        req = Request(base + '/api/printer/jobs?start=false', data=b'G28\\n',
+        req = Request(base + '/api/printer/jobs?start=false', data=b'G28\n',
                       headers={'Origin': base, 'Content-Type': 'text/plain'}, method='POST')
         with self.assertRaises(HTTPError) as ctx:
             urlopen(req, timeout=4)
