@@ -86,8 +86,8 @@ def test_convert_cli_local_output_and_upload_conversion(monkeypatch, tmp_path, c
 
         def upload_and_confirm_listed(self, path, remote_name, **_kwargs):
             assert path.read_bytes()[GCODE_OFFSET:] == original
-            assert remote_name == "part.gx"
-            return "0:/user/part.gx"
+            assert remote_name == "01_02_0.12m_part.gx"
+            return "0:/user/01_02_0.12m_part.gx"
 
     monkeypatch.setattr(cli, "_progress", lambda *_: None)
     monkeypatch.setattr(cli, "FlashForgeClient", Client)

@@ -14,8 +14,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 if __package__:
     from .cloudflare_access import load_access_config, verify_access_jwt, _jwks_client
@@ -71,11 +72,20 @@ def command(*args, timeout=30, selected=True):
 
 
 def safe_filename(name):
-    if not isinstance(name, str) or not FILE_NAME.fullmatch(name) or name in ('.', '..'):
+    # Do not turn path traversal into a harmless-looking filename. Check the
+    # original first, then transliterate common accented model names into ASCII
+    # compatible with the FlashForge M28 command grammar.
+    if (not isinstance(name, str) or len(name) > 120 or
+            any(ch in name for ch in ('/', '\\\\', ':')) or
+            any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
         raise ValueError('Nombre de archivo no válido')
-    if Path(name).suffix.lower() not in ('.gx', '.gcode', '.gco', '.g'):
+    normalized = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
+    normalized = re.sub(r'[^A-Za-z0-9_. -]', '_', normalized)
+    if not FILE_NAME.fullmatch(normalized) or normalized in ('.', '..'):
+        raise ValueError('Nombre de archivo no válido')
+    if Path(normalized).suffix.lower() not in ('.gx', '.gcode', '.gco', '.g'):
         raise ValueError('Solo se admiten archivos .gx, .gcode, .gco y .g')
-    return name
+    return normalized
 
 
 def worker_running(name):
@@ -236,14 +246,27 @@ class Handler(SimpleHTTPRequestHandler):
                 data = self.rfile.read(size)
                 if len(data) != size or not data.strip(b'\x00\r\n\t '):
                     raise ValueError('Archivo vacío o incompleto')
-                name = 'three-slicer-ad4.gcode' if legacy else safe_filename(
-                    unquote(parse_qs(url.query).get('name', [''])[0]))
+                # Preserve the real source name supplied by the slicer or file picker.
+                # Never silently replace an uploaded model with a generic filename.
+                try:
+                    name = safe_filename(parse_qs(url.query).get('name', [''])[0])
+                except ValueError as exc:
+                    return self.json(400, {'error': str(exc)})
                 start = parse_qs(url.query).get('start', ['false'])[0] == 'true'
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / name
                     filename.write_bytes(data)
                     output = command('upload', str(filename), *(['--start'] if start else []), timeout=3600)
-                return self.json(200, {'remote_name': name, 'started': start, 'detail': output[-1000:]})
+                # The CLI chooses the printer filename using GX header metadata;
+                # report the actual destination returned by the CLI, not the
+                # temporary name used to pass the file to the converter.
+                match = re.search(r'Uploaded and listed:\s*([^\r\n]+)', output)
+                if not match:
+                    raise RuntimeError('The CLI did not report a confirmed remote upload')
+                remote_path = match.group(1).strip()
+                return self.json(200, {'remote_name': remote_path.rsplit('/', 1)[-1],
+                                       'remote_path': remote_path, 'started': start,
+                                       'detail': output[-1000:]})
             body = self.data()
             if not isinstance(body, dict):
                 raise ValueError('Formato JSON no válido')

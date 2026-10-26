@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { annotateAd4Gcode, thumbnailBlockFromRgba, formatPrintDuration } from '../src/ad4JobMetadata.js'
+import { annotateAd4Gcode, thumbnailBlockFromRgba, formatPrintDuration, slicerJobFilename } from '../src/ad4JobMetadata.js'
 
 test('kernel duration, filament, printer settings are emitted as comments without moving G-code', () => {
   const original = 'G28\nM104 S205\nG1 X20 Y10 E1\n'
@@ -48,4 +48,13 @@ test('PNG thumbnail encoding uses real RGBA plate pixels, with dark background',
   assert.match(block, /thumbnail begin 80x60 12/)
   assert.match(block, /; iVBORw0KGgo=/)
   assert.deepEqual(Array.from(result.slice(0, 8)), [240, 80, 40, 255, 0, 0, 0, 255])
+})
+
+test('slicer preserves imported model filename instead of generic three-slicer upload name', () => {
+  assert.equal(slicerJobFilename([{ name: 'Banco de pruebas.stl', plate: 0 }], 0), 'Banco_de_pruebas.gcode')
+  assert.equal(slicerJobFilename([{ name: 'Pieza ágil.3mf', plate: 2 }], 2), 'Pieza_agil.gcode')
+  assert.equal(slicerJobFilename([{ name: 'one.obj', plate: 0 }, { name: 'two.stl', plate: 0 }], 0), 'one_plus_1_models.gcode')
+  assert.equal(slicerJobFilename([{ name: 'other.stl', plate: 1 }], 0), null)
+  assert.equal(slicerJobFilename([]), null)
+  assert.equal(slicerJobFilename([{ name: '../cube.stl' }]), 'cube.gcode')
 })

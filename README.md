@@ -118,6 +118,8 @@ ffadv4manager inspect model.gx
 ffadv4manager upload model.gx
 ```
 
+**Printer upload names:** by default both the slicer and CLI upload GX files as `HH_mm_X.XXm_original-name.gx`, e.g. `01_02_1.23m_Benchy.gx`. The hours/minutes and filament metres are taken from the actual GX header. When metadata is missing, the prefix visibly uses `--_--` or `unknownm` rather than claiming a fabricated estimate. An explicitly provided CLI `--remote-name` still overrides the automatic name. Names are normalized to safe ASCII printer filenames.
+
 The separate CLI `convert` command does not contact the printer. The `upload` command contacts real hardware. **Upload only is not a firmware-verified guarantee of no physical start**; do not test it unattended.
 
 See [GX thumbnail/metadata format and verification](docs/AD4_GX_METADATA.md). Firmware touchscreen behavior and correct storage of all bytes still need a supervised test on the actual Adventurer 4.

@@ -19,7 +19,7 @@ import {
 } from './profileLibrary.js'
 import { fullPreviewLayer, getPreviewControls, previewMoveCount, scrubPreviewMove, selectPreviewLayer } from './previewBridge.js'
 import { checkArtilleryHeating } from './temperatureSafety.js'
-import { annotateAd4Gcode, captureAd4PlateThumbnail } from './ad4JobMetadata.js'
+import { annotateAd4Gcode, captureAd4PlateThumbnail, slicerJobFilename } from './ad4JobMetadata.js'
 
 // Keep this hook adapter at module scope: three-slicer-viewer calls it as a hook.
 const slicer = (deps) => useSlicer({ ...deps, makeWorker: makeSlicerWorker })
@@ -386,6 +386,7 @@ export default function Demo() {
   const machine = AD4
   const [autoSlice, setAutoSlice] = useState(false)
   const [objects, setObjects] = useState(0)
+  const [modelRows, setModelRows] = useState([])
   const [sliced, setSliced] = useState(null)
   const [sending, setSending] = useState(false)
   const [printerState, setPrinterState] = useState('Disconnected')
@@ -447,6 +448,7 @@ export default function Demo() {
 
   const sendPrint = async (start) => {
     if (!sliced || sending) return
+    if (!sliced.name) { setStatus('Cannot upload: source model filename is missing.'); return }
     if (!materialReady) { setStatus('Select a filament profile before printing.'); return }
     const heatingWarnings = checkArtilleryHeating(sliced.gcode, settings.filament_settings_id)
     if (heatingWarnings.length) {
@@ -455,7 +457,7 @@ export default function Demo() {
     }
     setSending(true)
     try {
-      const response = await fetch(`/api/printer/jobs?start=${start ? 'true' : 'false'}`, {
+      const response = await fetch(`/api/printer/jobs?start=${start ? 'true' : 'false'}&name=${encodeURIComponent(sliced.name)}`, {
         method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: sliced.gcode,
       })
       const result = await response.json()
@@ -906,7 +908,7 @@ export default function Demo() {
           if (event.type === 'slicing' && event.value) pausePlayback()
           if (event.type === 'error') { setProgress(null); setStatus(`Error: ${event.value}`) }
           if (event.type === 'notice') setStatus(event.value)
-          if (event.type === 'objects') setObjects(event.value.length)
+          if (event.type === 'objects') { setObjects(event.value.length); setModelRows(event.value); setSliced(null) }
           if (event.type === 'canvasMode') {
             if (event.value !== 'preview') pausePlayback()
             setPreview(current => ({ ...current, mode: event.value }))
@@ -931,7 +933,8 @@ export default function Demo() {
           // The renderer already provides the exact off-screen model thumbnail
           // used by ThreeSlicer exports; send it and the kernel's real duration.
           const rgba = captureAd4PlateThumbnail(plate)
-          setSliced({ gcode: annotateAd4Gcode(gcode, stats, settings, rgba) })
+          const name = slicerJobFilename(modelRows, plate)
+          setSliced({ gcode: annotateAd4Gcode(gcode, stats, settings, rgba), name })
           requestAnimationFrame(() => setPreview(current => ({ ...current, hasMoves: Boolean(getPreviewControls(viewerHost.current)?.move) })))
         }}
       />

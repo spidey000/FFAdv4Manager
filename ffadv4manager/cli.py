@@ -25,7 +25,9 @@ from ffadv4manager.core.inspect_file import inspect_file
 from ffadv4manager.core.gcode_to_gx import (
     convert_gcode_to_gx,
     upload_file as gx_upload_file,
+    is_gx,
 )
+from ffadv4manager.core.upload_naming import gx_remote_filename
 
 DEFAULT_PORT = 8899
 DEFAULT_TIMEOUT = 8.0
@@ -449,9 +451,14 @@ def main(argv: list[str] | None = None) -> int:
                 args.file, no_convert=args.no_convert
             ) as (upload_path, converted_name):
                 remote_name = args.remote_name
-                if converted_name:
-                    requested = Path(remote_name).name if remote_name else converted_name
-                    remote_name = str(Path(requested).with_suffix(".gx"))
+                if remote_name and converted_name:
+                    # Explicit CLI override remains authoritative, but a converted
+                    # upload must retain its GX suffix.
+                    remote_name = str(Path(remote_name).with_suffix(".gx"))
+                elif not remote_name and is_gx(upload_path):
+                    remote_name = gx_remote_filename(upload_path, Path(args.file).name)
+                elif not remote_name and converted_name:
+                    remote_name = converted_name
                 remote = client.upload_and_confirm_listed(
                     upload_path, remote_name, progress=_progress,
                     response_callback=response_callback,
