@@ -124,6 +124,21 @@ The separate CLI `convert` command does not contact the printer. The `upload` co
 
 See [GX thumbnail/metadata format and verification](docs/AD4_GX_METADATA.md). Firmware touchscreen behavior and correct storage of all bytes still need a supervised test on the actual Adventurer 4.
 
+## Layer estimation and layer-triggered timelapse
+
+The Adventurer 4 (observed firmware 2.2.4) reports `Layer: 0/0` even while printing. FFAdv4Manager now derives an **estimated** layer index from local G-code/GX extrusion heights and matches it to live `M114` Z coordinates; the `M27` percentage remains independent. Two stable readings are needed before a layer-change event, reducing false triggers from Z-hop. Layer tracking requires the original print file (or its generated index) and cannot identify a never-uploaded, unknown file. Variable layer heights are supported, but Z-hop coinciding with another layer height or very short layers can still reduce accuracy.
+
+The web upload keeps only small, printer-scoped sidecar layer indices in the server's state directory (`$XDG_STATE_HOME/ffadv4manager/layers`, configurable using `AD4_LAYER_STATE_DIR`). Both the printer status API and the UI display estimated layer and Z, with an explicit source label. Select **automatic layer timelapse** before printing or start **By layer** during a tracked print. Layer captures stop when the printer reports a finished/ready state; an `M27` value of `100/100` alone does not terminate recording. Pause does not end recording. An MP4 is created at the end, downloadable through the authenticated UI. Captures are retained on the host at `$XDG_STATE_HOME/ffadv4manager/timelapses`.
+
+`ffmpeg` must be installed on the server to produce MP4 videos. Offline CLI tools also work without the web UI:
+
+```sh
+ffadv4manager layers model.gx --json
+ffadv4manager camera timelapse /path/to/output --on-layer --layer-file model.gx --interval 1.5 --job-name model.gx
+```
+
+Do not rely on layer estimates as verified firmware telemetry or a physical printer safety signal. No printer firmware modifications are made.
+
 ## Private HTTPS access from anywhere
 
 Read **[Cloudflare Tunnel + Access deployment](docs/DEPLOY_CLOUDFLARE.md)**. In short: build the frontend on the LAN host, secure the public hostname with an Access Allow policy *first*, publish an outbound Tunnel route to `http://127.0.0.1:8765`, then run `ffadv4manager slicer --require-access` with all four `CF_ACCESS_*` variables. No port forwarding. The protected production URL is `https://YOUR_HOSTNAME/`, not the historical `/Three_slicer_responsive/` GitHub Pages path.
