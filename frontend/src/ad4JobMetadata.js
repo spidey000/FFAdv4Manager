@@ -99,7 +99,7 @@ export function slicerJobFilename(rows, plate = 0) {
   if (!Array.isArray(rows)) return null
   const names = [...new Set(rows
     .filter(row => row && row.visible !== false && Number(row.plate ?? 0) === Number(plate))
-    .map(row => String(row.name || '').split(/[\\/]/).pop())
+    .map(row => String(row.name || '').split(/[\/\\]/).pop())
     .filter(Boolean)
     .map(name => name.replace(/\.[^.]+$/, '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[_\-.]+|[_\-.]+$/g, ''))

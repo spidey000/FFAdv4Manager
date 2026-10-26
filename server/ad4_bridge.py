@@ -250,7 +250,7 @@ class Handler(SimpleHTTPRequestHandler):
                 # The CLI chooses the printer filename using GX header metadata;
                 # report the actual destination returned by the CLI, not the
                 # temporary name used to pass the file to the converter.
-                match = re.search(r'Uploaded and listed:\\s*([^\\r\\n]+)', output)
+                match = re.search(r'Uploaded and listed:\s*([^\r\n]+)', output)
                 if not match:
                     raise RuntimeError('The CLI did not report a confirmed remote upload')
                 remote_path = match.group(1).strip()
