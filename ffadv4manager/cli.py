@@ -252,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     timelapse.add_argument("--camera-port", type=_camera_port_arg)
     timelapse.add_argument("--camera-path")
     timelapse.add_argument("--on-layer", action="store_true", help="Capture only on a debounced M114 Z layer transition")
+    timelapse.add_argument("--mp4", action="store_true", help="Also encode fixed-interval captures as MP4")
     layer_source = timelapse.add_mutually_exclusive_group()
     layer_source.add_argument("--layer-file", help="Local G-code/GX for layer detection")
     layer_source.add_argument("--layer-index", help="Previously generated layer-index JSON")
@@ -899,7 +900,8 @@ def _capture_timelapse(client, args, host: str, url: str | None = None) -> int:
     if args.on_layer:
         layer_index = (LayerIndex.from_file(args.layer_file) if args.layer_file
                        else LayerIndex.from_json_file(args.layer_index))
-    if not shutil.which("ffmpeg"):
+    create_video = args.on_layer or getattr(args, "mp4", False)
+    if create_video and not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg must be installed to create timelapse MP4")
     directory = Path(args.directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -1005,7 +1007,8 @@ def _capture_timelapse(client, args, host: str, url: str | None = None) -> int:
                     time.sleep(min(args.interval, remaining))
     finally:
         signal.signal(signal.SIGTERM, previous_signal)
-        _encode_timelapse(directory)
+        if create_video:
+            _encode_timelapse(directory)
     return 0
 
 
