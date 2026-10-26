@@ -36,7 +36,7 @@ const canvasFactory = () => ({
   }),
   toDataURL: () => 'data:image/png;base64,' + png,
 })
-const source = 'G28\\nM104 S205\\nM140 S55\\nG1 X20 Y10 E1\\n'
+const source = 'G28\nM104 S205\nM140 S55\nG1 X20 Y10 E1\n'
 const result = annotateAd4Gcode(
   source,
   { time_estimate: 3723, filament_mm: 1234.5 },
@@ -70,6 +70,7 @@ def test_browser_job_generates_genuine_gx_header_and_bmp(tmp_path):
     assert "; thumbnail begin 80x60 " in gcode
     assert "; filament used [mm] = 1234.50" in gcode
     assert "M104 S205" in gcode and "M140 S55" in gcode
+    assert "G28\nM104 S205\nM140 S55\nG1 X20 Y10 E1\n" in gcode
 
     path = tmp_path / "browser-job.gcode"
     gx_path = tmp_path / "browser-job.gx"
