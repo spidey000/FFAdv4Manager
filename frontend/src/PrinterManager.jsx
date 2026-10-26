@@ -62,6 +62,7 @@ export default function PrinterManager({ onClose }) {
   const [cameraError, setCameraError] = useState('')
   const [selectedFile, setSelectedFile] = useState(null)
   const [timelapse, setTimelapse] = useState(null)
+  const [autoLayerTimelapse, setAutoLayerTimelapse] = useState(false)
   const cameraUrl = useRef('')
   const fileInput = useRef(null)
 
@@ -96,6 +97,9 @@ export default function PrinterManager({ onClose }) {
   const available = bridge && Boolean(state)
   const rawProgress = state?.progress_percent ?? (state?.sd_total > 0 ? state.sd_current / state.sd_total * 100 : null)
   const progress = typeof rawProgress === 'number' && Number.isFinite(rawProgress) ? Math.max(0, Math.min(100, Math.round(rawProgress))) : null
+  const estimatedLayer = state?.layer_source === 'estimated_z'
+  const shownLayer = estimatedLayer ? state?.layer_estimated_current : (state?.layer_total > 0 ? state?.layer_current : null)
+  const shownLayerTotal = estimatedLayer ? state?.layer_estimated_total : (state?.layer_total > 0 ? state?.layer_total : null)
 
   async function run(key, work, after) {
     if (busy) return
@@ -126,7 +130,7 @@ export default function PrinterManager({ onClose }) {
     if (!selectedFile) { fileInput.current?.click(); return }
     if (start && !window.confirm('¿Enviar e iniciar la impresión de ' + selectedFile.name + '? Comprueba físicamente la impresora.')) return
     await run(start ? 'Subir e imprimir' : 'Subir archivo', async () => {
-      const response = await fetch(ENDPOINT + '/upload?start=' + start + '&name=' + encode(selectedFile.name), {
+      const response = await fetch(ENDPOINT + '/upload?start=' + start + '&name=' + encode(selectedFile.name) + (start && autoLayerTimelapse ? '&timelapse=layer' : ''), {
         method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: selectedFile,
       })
       const result = await response.json().catch(() => null)
@@ -153,7 +157,9 @@ export default function PrinterManager({ onClose }) {
           <Card icon="file" title="Trabajo actual">
             <p className="pm-job-name">{state?.current_file || 'No hay un trabajo identificado'}</p>
             <div className="pm-job-progress"><div className="pm-progress"><span style={{ width: (progress ?? 0) + '%' }}/></div><strong>{progress == null ? '—' : progress + '%'}</strong></div>
-            <p className="pm-subtle">Capas: {text(state?.layer_current)} / {text(state?.layer_total)} · Progreso informado por la impresora</p>
+            <p className="pm-subtle">Capas: {text(shownLayer)} / {text(shownLayerTotal)} · {estimatedLayer ? 'Estimación por Z (M114)' : state?.layer_source === 'firmware' ? 'Informadas por firmware' : 'Sin índice de capas'}</p>
+            {state?.z_mm != null && <p className="pm-subtle">Altura Z observada: {Number(state.z_mm).toFixed(2)} mm · No se utiliza el % para calcular capas</p>}
+            <label className="pm-layer-option"><input type="checkbox" checked={autoLayerTimelapse} onChange={e => setAutoLayerTimelapse(e.target.checked)}/>Timelapse automático en cada nueva capa detectada</label>
             <div className="pm-actions three">
               <button type="button" disabled={!running || !!busy} onClick={() => action('Pausar', { action: 'pause' })}><Icon name="pause"/>Pausar</button>
               <button type="button" disabled={!paused || !!busy} onClick={() => action('Reanudar', { action: 'resume' })}><Icon name="play"/>Reanudar</button>
@@ -167,7 +173,7 @@ export default function PrinterManager({ onClose }) {
           </Card>
           <Card icon="file" title="Archivos de la impresora" right={<button type="button" className="pm-small" disabled={!bridge || !!busy} onClick={() => run('Actualizar archivos', () => api('/files'), setFiles)}>Actualizar</button>}>
             {files.length ? <div className="pm-list">{files.map(f => <div className="pm-list-item" key={f}><div><strong title={f}>{fileName(f)}</strong><small>{f}</small></div>
-              <button className="pm-small" type="button" disabled={!available || running || paused || !!busy} onClick={() => action('Imprimir archivo', { action: 'print', file: f }, '¿Imprimir el archivo almacenado ' + fileName(f) + '? Comprueba el material y la impresora.') }><Icon name="play"/> Imprimir</button></div>)}</div> : <p className="pm-empty">{bridge ? 'No se han encontrado archivos o aún no se ha consultado el almacenamiento.' : 'Requiere el puente local.'}</p>}
+              <button className="pm-small" type="button" disabled={!available || running || paused || !!busy} onClick={() => action('Imprimir archivo', { action: 'print', file: f, timelapse_on_start: autoLayerTimelapse }, '¿Imprimir el archivo almacenado ' + fileName(f) + '? Comprueba el material y la impresora.') }><Icon name="play"/> Imprimir</button></div>)}</div> : <p className="pm-empty">{bridge ? 'No se han encontrado archivos o aún no se ha consultado el almacenamiento.' : 'Requiere el puente local.'}</p>}
           </Card>
           <Card icon="camera" title="Cámara" right={<button className="pm-small" type="button" disabled={!bridge || !!busy} onClick={capture}><Icon name="camera"/> Capturar</button>}>
             {camera ? <img className="pm-camera-image" src={camera} alt="Última captura real de la cámara de la impresora"/> : <div className="pm-camera-empty"><Icon name="camera" size={32}/><span>Sin fotografía · Captura bajo demanda</span></div>}
@@ -185,10 +191,14 @@ export default function PrinterManager({ onClose }) {
             {diagnostic && <pre className="pm-diagnostic">{typeof diagnostic.output === 'string' ? diagnostic.output : JSON.stringify(diagnostic.output, null, 2)}</pre>}
           </Card>
           <Card icon="camera" title="Timelapse">
-            <p className="pm-subtle">Serie de 20 capturas JPEG, separadas 10 segundos. Guardadas en el equipo del puente, no por capas.</p>
-            <p className="pm-subtle">Capturas: {timelapse?.frames ?? 0} · {timelapse?.running ? 'En curso' : 'Detenido'}</p>
-            <div className="pm-actions"><button disabled={!bridge || !!busy || timelapse?.running} onClick={() => run('Iniciar timelapse', () => post('/timelapse', { action: 'start' }), setTimelapse)}>Iniciar</button>
-              <button disabled={!bridge || !!busy || !timelapse?.running} onClick={() => run('Detener timelapse', () => post('/timelapse', { action: 'stop' }), setTimelapse)}>Detener</button></div>
+            <p className="pm-subtle">Por capas: una captura por transición de Z confirmada a partir del archivo enviado. Alternativa: 20 capturas cada 10 s.</p>
+            <p className="pm-subtle">Capturas: {timelapse?.frames ?? 0} · {timelapse?.running ? 'En curso (' + (timelapse.mode === 'layer' ? 'capas' : 'tiempo') + ')' : 'Detenido'}</p>
+            <div className="pm-actions pm-wrap">
+              <button disabled={!bridge || !!busy || timelapse?.running || !running} onClick={() => run('Timelapse por capas', () => post('/timelapse', { action: 'start', mode: 'layer' }), setTimelapse)}>Por capas</button>
+              <button disabled={!bridge || !!busy || timelapse?.running} onClick={() => run('Timelapse por tiempo', () => post('/timelapse', { action: 'start', mode: 'interval' }), setTimelapse)}>Por tiempo</button>
+              <button disabled={!bridge || !!busy || !timelapse?.running} onClick={() => run('Detener timelapse', () => post('/timelapse', { action: 'stop' }), setTimelapse)}>Detener</button>
+            </div>
+            {timelapse?.video_ready && <a className="pm-small" href="/api/printer/timelapse/video">Descargar vídeo MP4</a>}
           </Card>
           <Card icon="bell" title="Notificaciones del CLI">
             <p className="pm-subtle">Avisos de escritorio en el ordenador Linux del puente (notify-send): pausa, desconexión, impresión y listo. No son notificaciones push al móvil.</p>
