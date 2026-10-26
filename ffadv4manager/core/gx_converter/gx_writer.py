@@ -14,7 +14,7 @@ MAGIC = b"xgcode 1.0\n\0"
 
 def build_header(meta: PrintMetadata) -> bytes:
     buff = MAGIC + struct.pack("<4i", 0, GX_BMP_OFFSET, GX_GCODE_OFFSET, GX_GCODE_OFFSET)
-    buff += struct.pack("<iiih", max(meta.print_time, 1), meta.filament_right_mm,
+    buff += struct.pack("<iiih", max(meta.print_time, 0), meta.filament_right_mm,
                         meta.filament_left_mm, meta.multi_extruder_type)
     buff += struct.pack("<8h", meta.layer_height_um, 0, meta.perimeter_shells,
                         meta.print_speed, meta.bed_temp, meta.nozzle_right, meta.nozzle_left, 1)

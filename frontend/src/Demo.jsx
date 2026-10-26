@@ -19,6 +19,7 @@ import {
 } from './profileLibrary.js'
 import { fullPreviewLayer, getPreviewControls, previewMoveCount, scrubPreviewMove, selectPreviewLayer } from './previewBridge.js'
 import { checkArtilleryHeating } from './temperatureSafety.js'
+import { annotateAd4Gcode, captureAd4PlateThumbnail } from './ad4JobMetadata.js'
 
 // Keep this hook adapter at module scope: three-slicer-viewer calls it as a hook.
 const slicer = (deps) => useSlicer({ ...deps, makeWorker: makeSlicerWorker })
@@ -367,7 +368,7 @@ function applyPreset(base, preset, keys, idKey, name) {
 }
 
 export default function Demo() {
-  const [settings, setSettings] = useState(() => ({ ...applyAd4SafeMachineLimits(printerSettings(AD4)), printer_settings_id: AD4 }))
+  const [settings, setSettings] = useState(() => ({ ...applyAd4SafeMachineLimits(printerSettings(AD4)), thumbnails: '80x60/PNG', printer_settings_id: AD4 }))
   const [plateSettings, setPlateSettings] = useState({})
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
   const [drawer, setDrawer] = useState(false)
@@ -922,12 +923,15 @@ export default function Demo() {
           if (event.type === 'moveScrub' && animation.current == null) setPreview(current => ({ ...current, move: event.value.at, max: event.value.max }))
           if (event.type === 'selectedPlate') { pausePlayback(); manualSelection.current = false; setPreview(current => ({ ...current, plate: event.value, layer: 0, move: 0 })) }
         }}
-        onSliced={({ stats, gcode }) => {
+        onSliced={({ plate, stats, gcode }) => {
           pausePlayback()
           manualSelection.current = false
           setProgress(null)
           setStatus(`Slicing complete · ${stats?.layers ?? '—'} layers`)
-          setSliced({ gcode })
+          // The renderer already provides the exact off-screen model thumbnail
+          // used by ThreeSlicer exports; send it and the kernel's real duration.
+          const rgba = captureAd4PlateThumbnail(plate)
+          setSliced({ gcode: annotateAd4Gcode(gcode, stats, settings, rgba) })
           requestAnimationFrame(() => setPreview(current => ({ ...current, hasMoves: Boolean(getPreviewControls(viewerHost.current)?.move) })))
         }}
       />

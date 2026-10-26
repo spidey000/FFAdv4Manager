@@ -31,12 +31,12 @@ FlashForge Adventurer 4
 ## Actual print flow
 
 1. User opens the protected frontend (static assets served by the bridge).
-2. Browser imports a model; slicer produces G-code and preview.
+2. Browser imports a model; ThreeSlicer produces G-code, print statistics, and a model preview. The UI adds G-code comments for real estimated time, filament, layer height, speeds and temperatures, plus a PNG thumbnail when available.
 3. User chooses **Upload only** or **Print**, after reviewing the current material and profile.
 4. Frontend `POST /api/printer/jobs?start=false|true` sends G-code to the bridge.
 5. Bridge writes a bounded temporary file and calls `ffadv4manager upload` (optional `--start`).
-6. CLI packages G-code/GX as supported, uploads via the FlashForge protocol and checks the printer's reported listing. Only `--start` requests explicit start.
-7. UI reports the CLI result; polling reads the actual printer's status. This is not proof of physical print success or uploaded byte integrity.
+6. The CLI converts G-code to an actual GX binary (58-byte xgcode header, 80×60 BMP in grayscale, followed by the G-code) and uploads the GX over the FlashForge protocol. Already-GX files are not double-wrapped. The printer's reported listing confirms only its filename; only `--start` requests explicit print start.
+7. UI reports the CLI result; polling reads the actual printer's status. This is not proof of physical print success, correct touchscreen preview, or uploaded byte integrity. See [GX metadata](AD4_GX_METADATA.md).
 
 ## Deployment mode caveats
 
