@@ -14,14 +14,17 @@ from . import BMP_HEIGHT, BMP_WIDTH, GX_BMP_SIZE
 
 
 def _raw_bmp_rgb(image: Image.Image) -> bytes:
-    img = image.convert("RGB").resize((BMP_WIDTH, BMP_HEIGHT), Image.Resampling.LANCZOS)
+    rgba = image.convert("RGBA").resize((BMP_WIDTH, BMP_HEIGHT), Image.Resampling.LANCZOS)
+    background = Image.new("RGBA", (BMP_WIDTH, BMP_HEIGHT), (0, 0, 0, 255))
+    background.alpha_composite(rgba)
+    img = background.convert("L")
     pixels = bytearray()
     for y in range(BMP_HEIGHT - 1, -1, -1):
         for x in range(BMP_WIDTH):
-            r, g, b = img.getpixel((x, y))
-            pixels.extend((b, g, r))
+            gray = img.getpixel((x, y))
+            pixels.extend((gray, gray, gray))
     file_header = struct.pack("<2sIHHI", b"BM", GX_BMP_SIZE, 0, 0, 54)
-    info_header = struct.pack("<IIIHHIIIIII", 40, BMP_WIDTH, BMP_HEIGHT, 1, 24, 0, len(pixels), 2835, 2835, 0, 0)
+    info_header = struct.pack("<IIIHHIIIIII", 40, BMP_WIDTH, BMP_HEIGHT, 1, 24, 0, len(pixels), 4724, 4724, 0, 0)
     data = file_header + info_header + bytes(pixels)
     if len(data) != GX_BMP_SIZE:
         raise RuntimeError(f"BMP size {len(data)} != {GX_BMP_SIZE}")
@@ -29,7 +32,7 @@ def _raw_bmp_rgb(image: Image.Image) -> bytes:
 
 
 def blank_bmp() -> bytes:
-    return _raw_bmp_rgb(Image.new("RGB", (BMP_WIDTH, BMP_HEIGHT), color=(255, 255, 255)))
+    return _raw_bmp_rgb(Image.new("RGB", (BMP_WIDTH, BMP_HEIGHT), color=(0, 0, 0)))
 
 
 def extract_thumbnail_bmp(lines: list[str]) -> bytes:
