@@ -9,7 +9,7 @@ description = "Command-line and library tooling for FlashForge Adventurer 3/4 ne
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-3.0-or-later" }
-dependencies = ["Pillow>=10.0.0", "PyJWT[crypto]>=2.8.0"]
+dependencies = ["Pillow>=10.0.0", "PyJWT[crypto]>=2.8.0", "imageio-ffmpeg>=0.6,<0.7"]
 authors = [{ name = "FFADV4Manager Contributors" }]
 keywords = ["flashforge", "adventurer", "3d-printing", "gcode"]
 classifiers = [

@@ -4,11 +4,14 @@ The GitHub Pages demo has no printer API. Protected remote access must use
 Cloudflare Access JWT verification at this loopback-only origin.
 """
 import atexit
+from datetime import datetime, timezone
+import hashlib
 import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -17,6 +20,9 @@ import threading
 import unicodedata
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
+
+from ffadv4manager.core.layers import LayerIndex, LayerTracker
+from ffadv4manager.core.video import ffmpeg_executable
 
 if __package__:
     from .cloudflare_access import load_access_config, verify_access_jwt, _jwks_client
@@ -28,7 +34,10 @@ ACCESS_CONFIG = load_access_config(os.environ)
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'frontend' / 'dist'
 BASE = '/'
-CLI = os.environ.get('AD4_CLI', 'ffadv4manager')
+# A bridge launched by .venv/bin/python must invoke the CLI from the same
+# environment, even without a shell 'activate' or PATH modifications.
+VENV_CLI = Path(sys.executable).parent / 'ffadv4manager'
+CLI = os.environ.get('AD4_CLI') or (str(VENV_CLI) if sys.prefix != sys.base_prefix else 'ffadv4manager')
 HOST = os.environ.get('AD4_HOST')
 MAX_GCODE = 100 * 1024 * 1024
 FILE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_. -]{0,119}\Z')
@@ -38,6 +47,123 @@ SELECTED = {'host': None, 'profile': None}
 DISCOVERED = {}
 WORKERS = {'timelapse': None, 'notifications': None}
 TIMELAPSE_DIR = None
+TIMELAPSE_MODE = None
+LAYER_TRACKERS = {}
+# Per-printer sidecar metadata only: original G-code and GX files are NOT kept.
+_STATE_HOME = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local' / 'state')))
+LAYER_DIR = Path(os.environ.get('AD4_LAYER_STATE_DIR', str(_STATE_HOME / 'ffadv4manager')))
+
+
+def _printer_key():
+    with STATE_LOCK:
+        profile, host = SELECTED['profile'], SELECTED['host']
+    return 'profile:' + profile if profile else 'host:' + str(host or HOST or 'configured-cli')
+
+
+def _index_path(filename):
+    # Hash both namespace and basename to avoid arbitrary paths in a filename.
+    key = _printer_key() + '\0' + Path(str(filename)).name.casefold()
+    return LAYER_DIR / 'layers' / (hashlib.sha256(key.encode('utf-8')).hexdigest() + '.json')
+
+
+def _save_index(filename, index):
+    path = _index_path(filename)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name(path.name + '.' + secrets.token_hex(6) + '.new')
+    temporary.write_text(json.dumps(index.as_dict()), encoding='utf-8')
+    temporary.replace(path)
+
+
+def _load_index(filename):
+    if not filename:
+        return None
+    path = _index_path(filename)
+    try:
+        return LayerIndex.from_json_file(path)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _augment_status(status):
+    """Reusable layer estimate for any API consumer; no phantom layer from M27 0/0."""
+    status['layer_estimated_current'] = None
+    status['layer_estimated_total'] = None
+    status['layer_source'] = 'unavailable'
+    status['z_mm'] = None
+    if status.get('layer_current') and status.get('layer_total'):
+        status['layer_source'] = 'firmware'
+        return status
+    if status.get('machine_status') not in ('BUILDING', 'BUILDING_FROM_SD', 'PRINTING', 'PAUSED'):
+        with STATE_LOCK:
+            LAYER_TRACKERS.clear()
+        return status
+    filename = status.get('current_file')
+    index = _load_index(filename)
+    if index is None:
+        return status
+    status['layer_estimated_total'] = len(index.heights)
+    status['layer_source'] = 'estimated_z'
+    try:
+        position = json.loads(command('position', '--json', timeout=12))
+        z_mm = position.get('Z')
+        if z_mm is None:
+            return status
+        z_mm = float(z_mm)
+        status['z_mm'] = z_mm
+        key = (_printer_key(), Path(str(filename)).name.casefold())
+        with STATE_LOCK:
+            tracked = LAYER_TRACKERS.get(key)
+            progress = status.get('progress_percent')
+            if (tracked is None or
+                    (isinstance(progress, (int, float)) and tracked[1] is not None
+                     and progress + 10 < tracked[1])):
+                tracker = LayerTracker(index, stable_samples=2)
+            else:
+                tracker = tracked[0]
+            tracker.observe(z_mm)
+            LAYER_TRACKERS[key] = (tracker, progress)
+            status['layer_estimated_current'] = tracker.layer
+    except (OSError, ValueError, TypeError, RuntimeError, subprocess.TimeoutExpired,
+            json.JSONDecodeError):
+        pass  # Status must remain available even if M114 cannot be read.
+    return status
+
+
+def _start_timelapse(mode, filename=None):
+    global TIMELAPSE_DIR, TIMELAPSE_MODE
+    if mode not in ('layer', 'interval'):
+        raise ValueError('Modo de timelapse no admitido')
+    ffmpeg_executable()  # Python package includes binary; no apt install required.
+    if mode == 'layer':
+        if not filename:
+            status = json.loads(command('status', '--json'))
+            if status.get('machine_status') not in ('BUILDING', 'BUILDING_FROM_SD', 'PRINTING', 'PAUSED'):
+                raise ValueError('Inicia una impresión antes del timelapse por capas')
+            filename = status.get('current_file')
+        if _load_index(filename) is None:
+            raise ValueError('No hay índice de capas para este archivo; súbelo desde esta web o usa timelapse por tiempo')
+        index_path = _index_path(filename)
+    with STATE_LOCK:
+        existing = WORKERS['timelapse']
+        if existing and existing.poll() is None:
+            raise ValueError('Ya existe un timelapse activo')
+        folder = LAYER_DIR / 'timelapses' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + secrets.token_hex(4))
+        folder.mkdir(parents=True, exist_ok=False, mode=0o700)
+        arguments = ['camera', 'timelapse', str(folder)]
+        if mode == 'layer':
+            arguments += ['--on-layer', '--layer-index', str(index_path),
+                          '--job-name', Path(str(filename)).name, '--interval', '1.5']
+        else:
+            arguments += ['--interval', '10', '--count', '20', '--mp4']
+        with (folder / 'error.log').open('w', encoding='utf-8') as error_log:
+            WORKERS['timelapse'] = subprocess.Popen(
+                cli_argv(*arguments), stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=error_log)
+        TIMELAPSE_DIR = folder
+        TIMELAPSE_MODE = mode
+    return timelapse_state()
+
+
 
 
 def private_ip(value):
@@ -97,8 +223,15 @@ def worker_running(name):
 def timelapse_state():
     with STATE_LOCK:
         folder = TIMELAPSE_DIR
-    return {'running': worker_running('timelapse'),
-            'frames': len(list(folder.glob('frame-*.jpg'))) if folder and folder.is_dir() else 0}
+    frames = len(list(folder.glob('frame-*.jpg'))) if folder and folder.is_dir() else 0
+    # JPEGs are deleted only after successful encoding. Preserve the count
+    # from the manifest for the final downloaded MP4.
+    if folder and not frames and (folder / 'timelapse.jsonl').is_file():
+        with (folder / 'timelapse.jsonl').open('r', encoding='utf-8') as manifest:
+            frames = sum(1 for line in manifest if '"image"' in line)
+    return {'running': worker_running('timelapse'), 'mode': TIMELAPSE_MODE,
+            'frames': frames,
+            'video_ready': bool(folder and (folder / 'timelapse.mp4').is_file())}
 
 
 def cleanup():
@@ -109,11 +242,10 @@ def cleanup():
         if worker and worker.poll() is None:
             worker.terminate()
             try:
-                worker.wait(timeout=3)
+                worker.wait(timeout=125)
             except subprocess.TimeoutExpired:
                 worker.kill()
-    if folder:
-        shutil.rmtree(folder, ignore_errors=True)
+    # Preserve captures and finalized MP4 after a server shutdown.
 
 
 atexit.register(cleanup)
@@ -187,7 +319,7 @@ class Handler(SimpleHTTPRequestHandler):
                     selection = dict(SELECTED)
                 return self.json(200, {**selection, 'notifying': worker_running('notifications')})
             if path == '/api/printer/status':
-                return self.json(200, json.loads(command('status', '--json')))
+                return self.json(200, _augment_status(json.loads(command('status', '--json'))))
             if path == '/api/printer/discover':
                 devices = json.loads(command('discover', '--json', timeout=12, selected=False))
                 if not isinstance(devices, list):
@@ -209,6 +341,22 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(200, {'output': json.loads(output) if kind != 'doctor' else output})
             if path == '/api/printer/timelapse':
                 return self.json(200, timelapse_state())
+            if path == '/api/printer/timelapse/video':
+                with STATE_LOCK:
+                    folder = TIMELAPSE_DIR
+                video = folder / 'timelapse.mp4' if folder else None
+                if not video or not video.is_file():
+                    return self.json(404, {'error': 'Vídeo MP4 no disponible'})
+                self.send_response(200)
+                self.send_header('Content-Type', 'video/mp4')
+                self.send_header('Content-Disposition', 'attachment; filename="timelapse.mp4"')
+                self.send_header('Content-Length', str(video.stat().st_size))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.end_headers()
+                with video.open('rb') as stream:
+                    shutil.copyfileobj(stream, self.wfile)
+                return
             if path == '/api/printer/camera':
                 with tempfile.TemporaryDirectory() as directory:
                     frame = Path(directory) / 'frame.jpg'
@@ -253,9 +401,22 @@ class Handler(SimpleHTTPRequestHandler):
                 except ValueError as exc:
                     return self.json(400, {'error': str(exc)})
                 start = parse_qs(url.query).get('start', ['false'])[0] == 'true'
+                auto_layers = parse_qs(url.query).get('timelapse', [''])[0] == 'layer'
+                if auto_layers and not start:
+                    raise ValueError('El timelapse automático requiere iniciar impresión')
+                if auto_layers and worker_running('timelapse'):
+                    raise ValueError('Ya existe un timelapse activo')
+                if auto_layers:
+                    ffmpeg_executable()
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / name
                     filename.write_bytes(data)
+                    try:
+                        layer_index = LayerIndex.from_file(filename)
+                    except (OSError, ValueError):
+                        layer_index = None
+                    if auto_layers and layer_index is None:
+                        raise ValueError('El archivo no contiene capas detectables')
                     output = command('upload', str(filename), *(['--start'] if start else []), timeout=3600)
                 # The CLI chooses the printer filename using GX header metadata;
                 # report the actual destination returned by the CLI, not the
@@ -264,8 +425,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not match:
                     raise RuntimeError('The CLI did not report a confirmed remote upload')
                 remote_path = match.group(1).strip()
+                if layer_index is not None:
+                    _save_index(remote_path, layer_index)
+                if auto_layers:
+                    _start_timelapse('layer', remote_path)
                 return self.json(200, {'remote_name': remote_path.rsplit('/', 1)[-1],
                                        'remote_path': remote_path, 'started': start,
+                                       'indexed_layers': len(layer_index.heights) if layer_index else None,
                                        'detail': output[-1000:]})
             body = self.data()
             if not isinstance(body, dict):
@@ -279,7 +445,12 @@ class Handler(SimpleHTTPRequestHandler):
                     listed = json.loads(command('files', '--json'))
                     if not isinstance(filename, str) or filename not in listed:
                         raise ValueError('El archivo no está en el listado actual')
+                    if body.get('timelapse_on_start') is True:
+                        if worker_running('timelapse') or _load_index(filename) is None:
+                            raise ValueError('Timelapse por capas no disponible: sube primero este archivo o detén el timelapse actual')
                     output = command('print', filename, timeout=50)
+                    if body.get('timelapse_on_start') is True:
+                        _start_timelapse('layer', filename)
                 elif action in simple:
                     output = command(*simple[action], timeout=50)
                 else:
@@ -323,24 +494,15 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(200, {'deleted': name})
             if path == '/api/printer/timelapse':
                 action = body.get('action')
+                if action == 'start':
+                    return self.json(200, _start_timelapse(body.get('mode', 'interval')))
+                if action != 'stop':
+                    raise ValueError('Acción de timelapse inválida')
                 with STATE_LOCK:
                     worker = WORKERS['timelapse']
-                    if action == 'stop':
-                        if worker and worker.poll() is None:
-                            worker.terminate()
-                        return self.json(200, timelapse_state())
-                    if action != 'start':
-                        raise ValueError('Acción de timelapse inválida')
-                    if worker and worker.poll() is None:
-                        raise ValueError('Timelapse ya activo')
-                    if TIMELAPSE_DIR:
-                        shutil.rmtree(TIMELAPSE_DIR, ignore_errors=True)
-                    TIMELAPSE_DIR = Path(tempfile.mkdtemp(prefix='ad4-timelapse-'))
-                    WORKERS['timelapse'] = subprocess.Popen(
-                        cli_argv('camera', 'timelapse', str(TIMELAPSE_DIR),
-                                 '--interval', '10', '--count', '20'),
-                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL)
+                if worker and worker.poll() is None:
+                    worker.terminate()
+                    worker.wait(timeout=125)  # SIGTERM causes MP4 finalization.
                 return self.json(200, timelapse_state())
             if path == '/api/printer/notifications':
                 action = body.get('action')

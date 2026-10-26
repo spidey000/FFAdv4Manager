@@ -20,9 +20,11 @@ printer LAN (TCP 8899; camera HTTP 8080).
 1. Check Linux, Node.js >=20, Python >=3.9, npm and network access. Ask me for
    the printer's LAN IP, public HTTPS hostname, authorized login email,
    Cloudflare Access team hostname and the application's AUD. Do not guess.
-2. Clone only this repository. Create .venv at its root, pip install -e .,
-   then cd frontend && npm ci && npm test && npm run build.
-3. Configure the printer with ffadv4manager config set --host PRINTER_LAN_IP.
+2. Clone only this repository and run `bash scripts/install.sh`. It creates
+   the .venv, installs the CLI/backend and the bundled FFmpeg binary through
+   imageio-ffmpeg, installs npm dependencies and builds the frontend. Run
+   frontend tests with `npm --prefix frontend test`.
+3. Configure the printer with ./.venv/bin/ffadv4manager config set --host PRINTER_LAN_IP.
    Run read-only CLI status --json and discover --json; do not issue a print,
    upload, fan, temperature or motion command during setup.
 4. Configure a Cloudflare Access self-hosted application with an Allow policy
@@ -34,7 +36,7 @@ printer LAN (TCP 8899; camera HTTP 8080).
 6. Store CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CF_ACCESS_EMAIL and
    CF_ACCESS_PUBLIC_ORIGIN in a root-readable, service-user-readable
    server-side environment file. No values in the repository or frontend.
-7. Run 'ffadv4manager slicer --require-access' with the repository as systemd
+7. Run './.venv/bin/ffadv4manager slicer --require-access' with the repository as systemd
    WorkingDirectory and the project's .venv. Keep the process loopback-only.
    Make the service persistent and preserve any unrelated tunnel routes.
 8. Verify unauthenticated origin requests fail closed, the Access login is
@@ -79,20 +81,13 @@ Requirements: Linux host on the printer LAN, Python 3.9+, pip/venv, Node.js 20+,
 ```bash
 git clone https://github.com/spidey000/FFAdv4Manager.git
 cd FFAdv4Manager
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-ffadv4manager config set --host 192.168.1.50  # Replace with the real LAN IP
-ffadv4manager status --json                     # Read-only connectivity check
-cd frontend
-npm ci
-npm test
-npm run build
-npm run local
+bash scripts/install.sh
+./.venv/bin/ffadv4manager config set --host YOUR_PRINTER_IP
+./.venv/bin/ffadv4manager status --json
+./.venv/bin/ffadv4manager slicer
 ```
 
-Open **http://127.0.0.1:8765/** on the server host. The server binds to loopback only. This URL is **not remotely accessible**; do not publish this unauthenticated local-only mode through a tunnel. `npm run local` runs the Python server from the frontend directory; run it with the activated Python venv. Alternatively, from the repository root, run `ffadv4manager slicer`.
+Open **http://127.0.0.1:8765/** on the server host. The bridge binds to loopback only: **never publish this unauthenticated mode** through a tunnel. `npm --prefix frontend run local` also uses the project's `.venv` without shell activation. The installer does not set up your printer, credentials, services or remote network access. Node/npm are required to build the frontend and remain in `frontend/node_modules`, separate from Python's `.venv`.
 
 To use the slicer UI without the server while developing: `cd frontend && npm run dev`. Printer controls need the separately running bridge. The Vite development server is **not** the supported remote production service.
 
@@ -123,6 +118,23 @@ ffadv4manager upload model.gx
 The separate CLI `convert` command does not contact the printer. The `upload` command contacts real hardware. **Upload only is not a firmware-verified guarantee of no physical start**; do not test it unattended.
 
 See [GX thumbnail/metadata format and verification](docs/AD4_GX_METADATA.md). Firmware touchscreen behavior and correct storage of all bytes still need a supervised test on the actual Adventurer 4.
+
+## Layer estimation and layer-triggered timelapse
+
+The Adventurer 4 (observed firmware 2.2.4) reports `Layer: 0/0` even while printing. FFAdv4Manager now derives an **estimated** layer index from local G-code/GX extrusion heights and matches it to live `M114` Z coordinates; the `M27` percentage remains independent. Two stable readings are needed before a layer-change event, reducing false triggers from Z-hop. Layer tracking requires the original print file (or its generated index) and cannot identify a never-uploaded, unknown file. Variable layer heights are supported, but Z-hop coinciding with another layer height or very short layers can still reduce accuracy.
+
+The web upload keeps only small, printer-scoped sidecar layer indices in the server's state directory (`$XDG_STATE_HOME/ffadv4manager/layers`, configurable using `AD4_LAYER_STATE_DIR`). Both the printer status API and the UI display estimated layer and Z, with an explicit source label. Select **automatic layer timelapse** before printing or start **By layer** during a tracked print. Layer captures stop when the printer reports a finished/ready state; an `M27` value of `100/100` alone does not terminate recording. Pause does not end recording. An MP4 is created at the end, downloadable through the authenticated UI. Captures are retained on the host at `$XDG_STATE_HOME/ffadv4manager/timelapses`.
+
+`ffmpeg` is provided automatically by the `imageio-ffmpeg` wheel installed inside the project `.venv` on supported platforms; no `apt install ffmpeg` or separate system-wide binary is necessary. Offline CLI tools also work without the web UI:
+
+```sh
+ffadv4manager layers model.gx --json
+ffadv4manager camera timelapse /path/to/output --on-layer --layer-file model.gx --interval 1.5 --job-name model.gx
+```
+
+Install or update both the CLI and web in one step using `bash scripts/install.sh` from the repository root. The installer reuses `.venv` and rebuilds the frontend; it does not contact the printer or touch Cloudflare settings. On unsupported operating systems or architectures, the installer reports a missing FFmpeg binary instead of falsely claiming the timelapse works.
+
+Do not rely on layer estimates as verified firmware telemetry or a physical printer safety signal. No printer firmware modifications are made.
 
 ## Private HTTPS access from anywhere
 

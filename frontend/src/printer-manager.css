@@ -98,3 +98,17 @@
   .pm-inputs { grid-template-columns:1fr; }
 }
 @media(prefers-reduced-motion:reduce) { .pm-overlay * { transition:none!important; } }
+/* Native-feeling, accessible ON/OFF control using the app's lime accent. */
+.pm-layer-option { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0;
+  color:#d5e2e9; font-size:11px; cursor:pointer; }
+.pm-layer-option input[type="checkbox"] { position:relative; appearance:none; -webkit-appearance:none;
+  flex:none; width:63px; height:30px; margin:0; border:1px solid #51606c; border-radius:999px;
+  background:#303b47; cursor:pointer; transition:background .2s; }
+.pm-layer-option input[type="checkbox"]::after { content:"OFF"; position:absolute; top:4px; right:5px;
+  width:27px; text-align:center; line-height:20px; font-size:9px; font-weight:800; color:#b7c4ce; }
+.pm-layer-option input[type="checkbox"]::before { content:""; position:absolute; top:4px; left:4px;
+  width:20px; height:20px; border-radius:50%; background:#c4d0d8; transition:transform .2s; }
+.pm-layer-option input[type="checkbox"]:checked { background:#759f28; border-color:#a3e635; }
+.pm-layer-option input[type="checkbox"]:checked::after { content:"ON"; left:5px; right:auto; color:#101b12; }
+.pm-layer-option input[type="checkbox"]:checked::before { transform:translateX(34px); background:#e9ffc0; }
+.pm-layer-option input[type="checkbox"]:focus-visible { outline:2px solid #c4f97a; outline-offset:3px; }

@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import math
+import signal
 from pathlib import Path
 import shutil
 import subprocess
@@ -22,6 +23,8 @@ from ffadv4manager.core import (
 from ffadv4manager import config as config_store
 from ffadv4manager import profiles as profile_store
 from ffadv4manager.core.inspect_file import inspect_file
+from ffadv4manager.core.layers import LayerIndex, LayerTracker
+from ffadv4manager.core.video import ffmpeg_executable
 from ffadv4manager.core.gcode_to_gx import (
     convert_gcode_to_gx,
     upload_file as gx_upload_file,
@@ -45,7 +48,8 @@ _HELP_TOPICS = {
     "camera url": "camera url [--camera-port PORT] [--camera-path PATH]\n  Print only the camera stream URL, suitable for piping. Uses the configured printer host or root --host. Defaults are port 8080 and path /?action=stream; paths are kept literally, including query strings. No network request is made.",
     "camera open": "camera open [--camera-port PORT] [--camera-path PATH]\n  Ask Python's stdlib webbrowser module to open the MJPEG URL. This depends on a usable desktop browser; headless systems may not open a browser, in which case the URL is printed with guidance. The stream is plain HTTP and has no authentication.",
     "camera snapshot": "camera snapshot OUTPUT [--camera-port PORT] [--camera-path PATH]\n  Download and save the first complete JPEG frame, bounded by the helper's response-size limit. On success prints only the saved path. Requires the camera HTTP endpoint to be reachable; no printer TCP connection is used.",
-    "camera timelapse": "camera timelapse DIRECTORY [--interval SECONDS] [--count N | --duration SECONDS]\n  Capture interval-based JPEG stills and append status metadata to timelapse.jsonl. Layer synchronization is not provided.",
+    "camera timelapse": "camera timelapse DIRECTORY [--interval SECONDS] [--on-layer --layer-file FILE | --layer-index FILE]\n  Save camera snapshots per detected layer change (using M114 and the local toolpath) or at fixed intervals. Requires ffmpeg for the final MP4.",
+    "layers": "layers LOCAL_FILE [--json]\n  Build an offline 1-based extrusion layer index for .gcode or .gx; the estimate can be combined with printer M114 Z.",
     "upload": "upload LOCAL_FILE [--remote-name NAME] [--no-convert] [--start] [--force] [--log-file PATH]\n  Upload a local G-code/GX file; G-code is wrapped as GX automatically, preserving the original. --no-convert bypasses wrapping. Without --start, upload does not select or print the file; M661 does not verify size or content. --start explicitly selects and starts it after the listing check. Upload is refused when status reports printing unless --force is supplied. --log-file appends timestamped printer-response JSONL.",
     "convert": "convert INPUT --output OUTPUT.gx\n  Locally wrap supported G-code as GX. Does not contact a printer.",
     "inspect": "inspect LOCAL_FILE\n  Inspect local size, SHA-256, format, and recognized G-code metadata; does not contact a printer.",
@@ -209,6 +213,9 @@ def main(argv: list[str] | None = None) -> int:
     info_cmd.add_argument("--json", action="store_true")
     position_cmd = sub.add_parser("position", help="Read reported machine coordinates")
     position_cmd.add_argument("--json", action="store_true")
+    layers_cmd = sub.add_parser("layers", help="Index printable Z layers in a local G-code/GX file")
+    layers_cmd.add_argument("file")
+    layers_cmd.add_argument("--json", action="store_true")
     inspect_cmd = sub.add_parser("inspect", help="Inspect a local G-code/GX file")
     inspect_cmd.add_argument("file")
     doctor = sub.add_parser("doctor", help="Check printer and camera connectivity")
@@ -245,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     timelapse.add_argument("--duration", type=float)
     timelapse.add_argument("--camera-port", type=_camera_port_arg)
     timelapse.add_argument("--camera-path")
+    timelapse.add_argument("--on-layer", action="store_true", help="Capture only on a debounced M114 Z layer transition")
+    timelapse.add_argument("--mp4", action="store_true", help="Also encode fixed-interval captures as MP4")
+    layer_source = timelapse.add_mutually_exclusive_group()
+    layer_source.add_argument("--layer-file", help="Local G-code/GX for layer detection")
+    layer_source.add_argument("--layer-index", help="Previously generated layer-index JSON")
+    timelapse.add_argument("--job-name", help="Require this printer-side filename to be active")
     monitor = sub.add_parser("monitor", help="Record printer status to JSONL")
     monitor.add_argument("--output", required=True)
     monitor.add_argument("--interval", type=float, default=5.0)
@@ -339,6 +352,18 @@ def main(argv: list[str] | None = None) -> int:
             serve(require_access=args.require_access)
             return 0
         except Exception as exc:  # noqa: BLE001
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    if args.command == "layers":
+        try:
+            index = LayerIndex.from_file(args.file)
+            if args.json:
+                print(json.dumps(index.as_dict()))
+            else:
+                print(f"Printable layers: {len(index.heights)}; first Z: {index.heights[0]:.3f} mm; last Z: {index.heights[-1]:.3f} mm")
+            return 0
+        except (ValueError, OSError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
 
@@ -843,12 +868,45 @@ def _handle_doctor(args) -> int:
     return 1 if failures else 0
 
 
+def _encode_timelapse(directory: Path) -> None:
+    """Make a compact, browser-compatible MP4; never delete original frames on failure."""
+    frames = sorted(directory.glob("frame-*.jpg"))
+    if not frames:
+        return
+    ffmpeg = ffmpeg_executable()
+    result = subprocess.run([
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-framerate", "12", "-pattern_type", "glob", "-i", "frame-*.jpg",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "timelapse.mp4",
+    ], cwd=directory, capture_output=True, text=True, timeout=120, check=False)
+    if result.returncode or not (directory / "timelapse.mp4").is_file():
+        raise RuntimeError("ffmpeg failed to create MP4: " + result.stderr[-400:])
+    # Keep only the compressed video and the small JSONL metadata after a
+    # successful conversion. Preserve JPEGs when ffmpeg fails for recovery.
+    for frame in frames:
+        frame.unlink()
+    print(f"MP4: {directory / 'timelapse.mp4'}", flush=True)
+
+
 def _capture_timelapse(client, args, host: str, url: str | None = None) -> int:
     _validate_poll(args.interval, args.count)
     if args.duration is not None and (not math.isfinite(args.duration) or args.duration <= 0):
         raise ValueError("duration must be a positive finite number")
     if args.count is not None and args.duration is not None:
         raise ValueError("choose either --count or --duration, not both")
+    if args.on_layer and not (args.layer_file or args.layer_index):
+        raise ValueError("--on-layer requires --layer-file or --layer-index")
+    if not args.on_layer and (args.layer_file or args.layer_index or args.job_name):
+        raise ValueError("--layer-file, --layer-index and --job-name require --on-layer")
+    # Validate prerequisites before launching any camera/print-state polling.
+    layer_index = None
+    if args.on_layer:
+        layer_index = (LayerIndex.from_file(args.layer_file) if args.layer_file
+                       else LayerIndex.from_json_file(args.layer_index))
+    create_video = args.on_layer or getattr(args, "mp4", False)
+    if create_video:
+        ffmpeg_executable()  # Verify dependency before recording.
     directory = Path(args.directory)
     directory.mkdir(parents=True, exist_ok=True)
     if url is None:
@@ -859,27 +917,103 @@ def _capture_timelapse(client, args, host: str, url: str | None = None) -> int:
             getattr(args, "camera_path", None) or settings.get("camera_path", DEFAULT_CAMERA_PATH),
         )
     deadline = time.monotonic() + args.duration if args.duration is not None else None
+    startup_deadline = time.monotonic() + 120
+    tracker = LayerTracker(layer_index) if layer_index else None
+    started_printing = False
+    captured_layer = None
     index = 0
+    stop = False
     manifest = directory / "timelapse.jsonl"
-    while args.count is None or index < args.count:
-        if deadline is not None and time.monotonic() >= deadline:
-            break
-        status = client.status()
-        stamp = datetime.now(timezone.utc)
-        output = directory / f"frame-{stamp.strftime('%Y%m%dT%H%M%S')}-{index:06d}.jpg"
-        capture_first_frame(url, output)
-        _record_jsonl(str(manifest), {
-            "timestamp": stamp.isoformat(), "image": output.name,
-            "machine_status": status.machine_status, "current_file": status.current_file,
-            "progress_percent": status.progress_percent,
-        })
-        print(output, flush=True)
-        index += 1
-        if args.count is not None and index >= args.count:
-            break
-        remaining = deadline - time.monotonic() if deadline is not None else args.interval
-        if remaining > 0:
-            time.sleep(min(args.interval, remaining))
+    # SIGTERM from the web 'stop' action must finalize MP4 instead of abruptly
+    # killing the capture process. The CLI runs this code in its main thread.
+    previous_signal = signal.getsignal(signal.SIGTERM)
+
+    def request_stop(_signum, _frame):
+        nonlocal stop
+        stop = True
+
+    signal.signal(signal.SIGTERM, request_stop)
+    try:
+        while not stop and (args.count is None or index < args.count):
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            status = client.status()
+            if args.on_layer:
+                if status.is_printing:
+                    started_printing = True
+                elif started_printing and status.machine_status in ("READY", "FINISHED", "COMPLETE", "ERROR", "CANCELLED"):
+                    # Do not end simply because M27 reaches 100/100: on this
+                    # firmware that can precede the final physical state.
+                    break
+                elif not started_printing and time.monotonic() >= startup_deadline:
+                    raise RuntimeError("print did not start within 120 seconds")
+                if args.job_name and status.is_printing:
+                    if (not status.current_file or
+                            Path(status.current_file).name.casefold() != Path(args.job_name).name.casefold()):
+                        raise RuntimeError("active printer file changed; refusing layer captures")
+                if status.is_printing:
+                    try:
+                        position = client.position()
+                        z_mm = position.get("Z")
+                    except (OSError, ValueError, RuntimeError):
+                        z_mm = None
+                    if tracker.observe(z_mm) and tracker.layer != captured_layer:
+                        stamp = datetime.now(timezone.utc)
+                        output = directory / f"frame-{stamp.strftime('%Y%m%dT%H%M%S')}-{index:06d}.jpg"
+                        try:
+                            capture_first_frame(url, output)
+                        except Exception as exc:  # retry this layer on next poll
+                            _record_jsonl(str(manifest), {"timestamp": stamp.isoformat(),
+                                "event": "snapshot_error", "layer": tracker.layer, "error": str(exc)})
+                        else:
+                            captured_layer = tracker.layer
+                            _record_jsonl(str(manifest), {
+                                "timestamp": stamp.isoformat(), "image": output.name,
+                                "event": "layer_change", "layer_estimated": tracker.layer,
+                                "layer_total": len(layer_index.heights), "z_mm": z_mm,
+                                "machine_status": status.machine_status,
+                                "current_file": status.current_file,
+                                "progress_percent": status.progress_percent,
+                            })
+                            print(output, flush=True)
+                            index += 1
+                    elif tracker.layer is not None and tracker.layer != captured_layer:
+                        # The first snapshot may have failed. Retry without
+                        # requiring a second artificial layer transition.
+                        stamp = datetime.now(timezone.utc)
+                        output = directory / f"frame-{stamp.strftime('%Y%m%dT%H%M%S')}-{index:06d}.jpg"
+                        try:
+                            capture_first_frame(url, output)
+                        except Exception:
+                            pass
+                        else:
+                            captured_layer = tracker.layer
+                            _record_jsonl(str(manifest), {
+                                "timestamp": stamp.isoformat(), "image": output.name,
+                                "event": "layer_retry", "layer_estimated": tracker.layer,
+                                "layer_total": len(layer_index.heights), "z_mm": z_mm,
+                            })
+                            print(output, flush=True)
+                            index += 1
+            else:
+                stamp = datetime.now(timezone.utc)
+                output = directory / f"frame-{stamp.strftime('%Y%m%dT%H%M%S')}-{index:06d}.jpg"
+                capture_first_frame(url, output)
+                _record_jsonl(str(manifest), {
+                    "timestamp": stamp.isoformat(), "image": output.name,
+                    "machine_status": status.machine_status, "current_file": status.current_file,
+                    "progress_percent": status.progress_percent,
+                })
+                print(output, flush=True)
+                index += 1
+            if not stop and (args.count is None or index < args.count):
+                remaining = deadline - time.monotonic() if deadline is not None else args.interval
+                if remaining > 0:
+                    time.sleep(min(args.interval, remaining))
+    finally:
+        signal.signal(signal.SIGTERM, previous_signal)
+        if create_video:
+            _encode_timelapse(directory)
     return 0
 
 
