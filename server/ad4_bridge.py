@@ -22,6 +22,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from ffadv4manager.core.layers import LayerIndex, LayerTracker
+from ffadv4manager.core.video import ffmpeg_executable
 
 if __package__:
     from .cloudflare_access import load_access_config, verify_access_jwt, _jwks_client
@@ -129,8 +130,7 @@ def _start_timelapse(mode, filename=None):
     global TIMELAPSE_DIR, TIMELAPSE_MODE
     if mode not in ('layer', 'interval'):
         raise ValueError('Modo de timelapse no admitido')
-    if not shutil.which('ffmpeg'):
-        raise ValueError('Se necesita ffmpeg para generar el vídeo MP4')
+    ffmpeg_executable()  # Python package includes binary; no apt install required.
     if mode == 'layer':
         if not filename:
             status = json.loads(command('status', '--json'))
@@ -403,8 +403,8 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError('El timelapse automático requiere iniciar impresión')
                 if auto_layers and worker_running('timelapse'):
                     raise ValueError('Ya existe un timelapse activo')
-                if auto_layers and not shutil.which('ffmpeg'):
-                    raise ValueError('Se necesita ffmpeg para el vídeo de timelapse')
+                if auto_layers:
+                    ffmpeg_executable()
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / name
                     filename.write_bytes(data)
