@@ -24,6 +24,7 @@ from ffadv4manager import config as config_store
 from ffadv4manager import profiles as profile_store
 from ffadv4manager.core.inspect_file import inspect_file
 from ffadv4manager.core.layers import LayerIndex, LayerTracker
+from ffadv4manager.core.video import ffmpeg_executable
 from ffadv4manager.core.gcode_to_gx import (
     convert_gcode_to_gx,
     upload_file as gx_upload_file,
@@ -872,10 +873,9 @@ def _encode_timelapse(directory: Path) -> None:
     frames = sorted(directory.glob("frame-*.jpg"))
     if not frames:
         return
-    if not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg is required to finish a timelapse as MP4")
+    ffmpeg = ffmpeg_executable()
     result = subprocess.run([
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-framerate", "12", "-pattern_type", "glob", "-i", "frame-*.jpg",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "timelapse.mp4",
@@ -905,8 +905,8 @@ def _capture_timelapse(client, args, host: str, url: str | None = None) -> int:
         layer_index = (LayerIndex.from_file(args.layer_file) if args.layer_file
                        else LayerIndex.from_json_file(args.layer_index))
     create_video = args.on_layer or getattr(args, "mp4", False)
-    if create_video and not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg must be installed to create timelapse MP4")
+    if create_video:
+        ffmpeg_executable()  # Verify dependency before recording.
     directory = Path(args.directory)
     directory.mkdir(parents=True, exist_ok=True)
     if url is None:
