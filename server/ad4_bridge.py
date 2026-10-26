@@ -34,7 +34,10 @@ ACCESS_CONFIG = load_access_config(os.environ)
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'frontend' / 'dist'
 BASE = '/'
-CLI = os.environ.get('AD4_CLI', 'ffadv4manager')
+# A bridge launched by .venv/bin/python must invoke the CLI from the same
+# environment, even without a shell 'activate' or PATH modifications.
+VENV_CLI = Path(sys.executable).parent / 'ffadv4manager'
+CLI = os.environ.get('AD4_CLI') or (str(VENV_CLI) if sys.prefix != sys.base_prefix else 'ffadv4manager')
 HOST = os.environ.get('AD4_HOST')
 MAX_GCODE = 100 * 1024 * 1024
 FILE_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_. -]{0,119}\Z')
