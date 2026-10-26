@@ -96,6 +96,32 @@ Open **http://127.0.0.1:8765/** on the server host. The server binds to loopback
 
 To use the slicer UI without the server while developing: `cd frontend && npm run dev`. Printer controls need the separately running bridge. The Vite development server is **not** the supported remote production service.
 
+## Generate a real Adventurer 4 .gx file
+
+**The web slicer outputs G-code; it is the Python CLI that creates GX.** The integrated workflow is:
+
+```text
+STL / 3MF -> browser ThreeSlicer -> G-code + duration + filament + PNG thumbnail
+          -> POST /api/printer/jobs -> Python server -> ffadv4manager upload
+          -> GX binary (58-byte header + 80x60 BMP + executable G-code)
+          -> printer TCP 8899 (upload-only or upload-and-start)
+```
+
+The web UI uses the slicer's real estimate when available, renders an 80×60 model thumbnail (or uses an embedded thumbnail from the slicer), and adds G-code **comments only** for layer height, wall count, print speed, filament length and temperatures. The CLI converts those to the legacy FlashForge GX header and grayscale BMP. Temperature and motion commands in the executable G-code are **not** overwritten by metadata. When duration cannot be estimated, the header records `0` (unknown) rather than an invented second.
+
+In the web UI, **Upload only** or **Print** automatically creates the real GX inside the local CLI upload process; it is normally a temporary file and is sent as `.gx` to the printer. To **save a persistent GX on disk** independently, first export a G-code file from the slicer, then run:
+
+```bash
+ffadv4manager convert model.gcode --output model.gx
+ffadv4manager inspect model.gx
+# After reviewing model and printer, upload without explicitly starting:
+ffadv4manager upload model.gx
+```
+
+The separate CLI `convert` command does not contact the printer. The `upload` command contacts real hardware. **Upload only is not a firmware-verified guarantee of no physical start**; do not test it unattended.
+
+See [GX thumbnail/metadata format and verification](docs/AD4_GX_METADATA.md). Firmware touchscreen behavior and correct storage of all bytes still need a supervised test on the actual Adventurer 4.
+
 ## Private HTTPS access from anywhere
 
 Read **[Cloudflare Tunnel + Access deployment](docs/DEPLOY_CLOUDFLARE.md)**. In short: build the frontend on the LAN host, secure the public hostname with an Access Allow policy *first*, publish an outbound Tunnel route to `http://127.0.0.1:8765`, then run `ffadv4manager slicer --require-access` with all four `CF_ACCESS_*` variables. No port forwarding. The protected production URL is `https://YOUR_HOSTNAME/`, not the historical `/Three_slicer_responsive/` GitHub Pages path.
@@ -110,7 +136,7 @@ Configuration values are server-side only: `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_A
 | Snapshot from printer camera | Yes | Yes; single JPEG, not video |
 | Discover/select printer on LAN | Yes | Yes |
 | List stored printer files | Yes | Yes |
-| Upload G-code or GX | Yes | Yes |
+| Upload G-code or GX | Yes | Yes; browser-generated G-code is converted to GX by CLI |
 | Upload and request print start | Yes | Yes |
 | Start stored file | Yes | Yes |
 | Pause / resume / cancel | Yes | Yes |
@@ -119,7 +145,7 @@ Configuration values are server-side only: `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_A
 | Camera timelapse | Yes | Yes; fixed interval session |
 | Linux desktop notifications | Yes | Yes; runs on server, **not** phone push |
 | Printer connection profiles | Yes | Yes |
-| File thumbnail preview via CLI | Yes | CLI only |
+| Generate 80×60 GX print thumbnail and time estimate | Yes | Yes; provided by browser slicing and converted by CLI |\n| Read a stored-file thumbnail from printer | Yes | CLI only |
 | Raw protocol file listing | Yes | CLI only |
 | CLI watch, monitor and wait | Yes | CLI only (UI polls status) |
 | Rename printer | Yes | CLI only |
@@ -148,6 +174,6 @@ Automated tests are not a physical printer acceptance test. When validating a li
 
 ## Documentation and licensing
 
-- [Architecture](docs/ARCHITECTURE.md), [integration plan and provenance](docs/INTEGRATION_PLAN.md), [Cloudflare deployment](docs/DEPLOY_CLOUDFLARE.md), [API routes](docs/WEB_API.md), [CLI commands](docs/CLI.md).
+- [GX metadata and print preview](docs/AD4_GX_METADATA.md), [Architecture](docs/ARCHITECTURE.md), [integration plan and provenance](docs/INTEGRATION_PLAN.md), [Cloudflare deployment](docs/DEPLOY_CLOUDFLARE.md), [API routes](docs/WEB_API.md), [CLI commands](docs/CLI.md).
 - `docs/web/` and `docs/cli/UPSTREAM-README.md` preserve historical upstream documentation for reference. **Follow this root README and docs/DEPLOY_CLOUDFLARE.md** for the integrated layout; original two-repo paths are obsolete.
 - Web UI: AGPL-3.0-or-later (root [LICENSE](LICENSE)); original Python CLI: GPL-3.0-or-later ([license text](LICENSES/CLI-GPL-3.0.txt)); upstream Third-Party Notices: [frontend notices](frontend/THREE-PARTY-NOTICES.md). Keep source and third-party attribution when distributing modified builds.
