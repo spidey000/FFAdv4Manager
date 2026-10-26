@@ -935,7 +935,7 @@ def _capture_timelapse(client, args, host: str, url: str | None = None) -> int:
             if args.on_layer:
                 if status.is_printing:
                     started_printing = True
-                elif started_printing and status.machine_status != "PAUSED":
+                elif started_printing and status.machine_status in ("READY", "FINISHED", "COMPLETE", "ERROR", "CANCELLED"):
                     # Do not end simply because M27 reaches 100/100: on this
                     # firmware that can precede the final physical state.
                     break
