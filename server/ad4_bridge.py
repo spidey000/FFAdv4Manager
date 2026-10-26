@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -71,11 +72,20 @@ def command(*args, timeout=30, selected=True):
 
 
 def safe_filename(name):
-    if not isinstance(name, str) or not FILE_NAME.fullmatch(name) or name in ('.', '..'):
+    # Do not turn path traversal into a harmless-looking filename. Check the
+    # original first, then transliterate common accented model names into ASCII
+    # compatible with the FlashForge M28 command grammar.
+    if (not isinstance(name, str) or len(name) > 120 or
+            any(ch in name for ch in ('/', '\\\\', ':')) or
+            any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
         raise ValueError('Nombre de archivo no válido')
-    if Path(name).suffix.lower() not in ('.gx', '.gcode', '.gco', '.g'):
+    normalized = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
+    normalized = re.sub(r'[^A-Za-z0-9_. -]', '_', normalized)
+    if not FILE_NAME.fullmatch(normalized) or normalized in ('.', '..'):
+        raise ValueError('Nombre de archivo no válido')
+    if Path(normalized).suffix.lower() not in ('.gx', '.gcode', '.gco', '.g'):
         raise ValueError('Solo se admiten archivos .gx, .gcode, .gco y .g')
-    return name
+    return normalized
 
 
 def worker_running(name):

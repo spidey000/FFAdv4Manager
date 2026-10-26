@@ -38,6 +38,7 @@ class BridgeChecks(unittest.TestCase):
 
     def test_safe_names_and_private_host(self):
         self.assertEqual(bridge.safe_filename('model.gcode'), 'model.gcode')
+        self.assertEqual(bridge.safe_filename('Pieza ágil.gcode'), 'Pieza agil.gcode')
         with self.assertRaises(ValueError):
             bridge.safe_filename('../evil.gx')
         with self.assertRaises(ValueError):
