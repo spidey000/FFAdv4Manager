@@ -65,7 +65,7 @@ def _index_path(filename):
 def _save_index(filename, index):
     path = _index_path(filename)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary = path.with_suffix('.new')
+    temporary = path.with_name(path.name + '.' + secrets.token_hex(6) + '.new')
     temporary.write_text(json.dumps(index.as_dict()), encoding='utf-8')
     temporary.replace(path)
 
@@ -152,9 +152,10 @@ def _start_timelapse(mode, filename=None):
                           '--job-name', Path(str(filename)).name, '--interval', '1.5']
         else:
             arguments += ['--interval', '10', '--count', '20']
-        WORKERS['timelapse'] = subprocess.Popen(
-            cli_argv(*arguments), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=(folder / 'error.log').open('w', encoding='utf-8'))
+        with (folder / 'error.log').open('w', encoding='utf-8') as error_log:
+            WORKERS['timelapse'] = subprocess.Popen(
+                cli_argv(*arguments), stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=error_log)
         TIMELAPSE_DIR = folder
         TIMELAPSE_MODE = mode
     return timelapse_state()
@@ -396,6 +397,8 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError('El timelapse automático requiere iniciar impresión')
                 if auto_layers and worker_running('timelapse'):
                     raise ValueError('Ya existe un timelapse activo')
+                if auto_layers and not shutil.which('ffmpeg'):
+                    raise ValueError('Se necesita ffmpeg para el vídeo de timelapse')
                 with tempfile.TemporaryDirectory() as directory:
                     filename = Path(directory) / name
                     filename.write_bytes(data)
