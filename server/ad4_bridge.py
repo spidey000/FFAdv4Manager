@@ -151,7 +151,7 @@ def _start_timelapse(mode, filename=None):
             arguments += ['--on-layer', '--layer-index', str(index_path),
                           '--job-name', Path(str(filename)).name, '--interval', '1.5']
         else:
-            arguments += ['--interval', '10', '--count', '20']
+            arguments += ['--interval', '10', '--count', '20', '--mp4']
         with (folder / 'error.log').open('w', encoding='utf-8') as error_log:
             WORKERS['timelapse'] = subprocess.Popen(
                 cli_argv(*arguments), stdin=subprocess.DEVNULL,
