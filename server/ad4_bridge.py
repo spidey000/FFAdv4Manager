@@ -220,8 +220,14 @@ def worker_running(name):
 def timelapse_state():
     with STATE_LOCK:
         folder = TIMELAPSE_DIR
+    frames = len(list(folder.glob('frame-*.jpg'))) if folder and folder.is_dir() else 0
+    # JPEGs are deleted only after successful encoding. Preserve the count
+    # from the manifest for the final downloaded MP4.
+    if folder and not frames and (folder / 'timelapse.jsonl').is_file():
+        with (folder / 'timelapse.jsonl').open('r', encoding='utf-8') as manifest:
+            frames = sum(1 for line in manifest if '"image"' in line)
     return {'running': worker_running('timelapse'), 'mode': TIMELAPSE_MODE,
-            'frames': len(list(folder.glob('frame-*.jpg'))) if folder and folder.is_dir() else 0,
+            'frames': frames,
             'video_ready': bool(folder and (folder / 'timelapse.mp4').is_file())}
 
 
