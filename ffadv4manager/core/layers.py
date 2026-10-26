@@ -13,7 +13,8 @@ from pathlib import Path
 import re
 
 GX_GCODE_OFFSET = 14512
-_COMMAND = re.compile(r"^\s*(?:N\d+\s+)?(G0?0|G0?1|G90|G91|G92|M82|M83)\b", re.I)
+_COMMAND = re.compile(r"^\s*(?:N\d+\s+)?(G0?[0-3]|G90|G91|G92|M82|M83)\b", re.I)
+_LAYER_MARKER = re.compile(r"^\s*;\s*(?:LAYER_CHANGE\b|LAYER:\s*\d+\b)", re.I)
 _AXIS = re.compile(r"([XYZE])\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))", re.I)
 MAX_LAYERS = 20000
 
@@ -37,6 +38,7 @@ class LayerIndex:
         if path.suffix.lower() not in (".g", ".gco", ".gcode", ".gx"):
             raise ValueError("expected a G-code or GX file")
         heights: set[float] = set()
+        markers_started = False
         relative_xyz = False
         relative_e = False
         x = y = z = e = 0.0
@@ -53,7 +55,12 @@ class LayerIndex:
                 stream.seek(0)
 
             for raw in stream:
-                line = raw.decode("latin-1").split(";", 1)[0].strip()
+                source = raw.decode("latin-1")
+                if _LAYER_MARKER.match(source) and not markers_started:
+                    # Ignore purge lines in start G-code, when layer markers exist.
+                    heights.clear()
+                    markers_started = True
+                line = source.split(";", 1)[0].strip()
                 match = _COMMAND.match(line)
                 if not match:
                     continue
