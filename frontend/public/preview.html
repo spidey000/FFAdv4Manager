@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Three Slicer Responsive · Responsive preview</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#0f1217;color:#eef2f4;font:14px/1.5 system-ui,sans-serif}
+    header{padding:20px 24px;border-bottom:1px solid #303742}h1{font-size:20px;margin:0 0 3px}p{color:#aeb7c1;margin:0}
+    main{display:flex;gap:24px;align-items:flex-start;padding:24px;overflow-x:auto}.device{flex:0 0 auto}h2{font-size:13px;color:#a7e43d;margin:0 0 10px}
+    iframe{display:block;border:1px solid #414953;border-radius:14px;background:#171a20;box-shadow:0 16px 38px #0007}
+    .phone iframe{width:390px;height:760px}.tablet iframe{width:900px;height:680px}
+    @media(max-width:600px){header{padding:16px}main{padding:16px;gap:16px}}
+  </style>
+</head>
+<body>
+  <header><h1>Three Slicer Responsive</h1><p>Compare the live application at phone and tablet widths. Each frame is independently interactive.</p></header>
+  <main>
+    <section class="device phone"><h2>Mobile · 390 × 760</h2><iframe title="Mobile demo" src="./?rev=toolpath1"></iframe></section>
+    <section class="device tablet"><h2>Tablet · 900 × 680</h2><iframe title="Tablet demo" src="./?rev=toolpath1"></iframe></section>
+  </main>
+</body>
+</html>
