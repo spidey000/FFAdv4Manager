@@ -19,24 +19,20 @@ This is the **authoritative** deployment guide for the consolidated
 ```bash
 git clone https://github.com/spidey000/FFAdv4Manager.git
 cd FFAdv4Manager
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-ffadv4manager config set --host PRINTER_LAN_IP
-ffadv4manager status --json
-cd frontend
-npm ci
-npm test
-npm run build
-cd ..
-python -m pip install pytest
-python -m pytest -q tests
+bash scripts/install.sh
+./.venv/bin/ffadv4manager config set --host PRINTER_LAN_IP
+./.venv/bin/ffadv4manager status --json
+npm --prefix frontend test
+./.venv/bin/python -m pip install pytest
+./.venv/bin/python -m pytest -q tests
 ```
 
 Replace `PRINTER_LAN_IP` with the device's actual IP. Never commit it to a
-public configuration file. Running tests and `status` does not request
-printer movement or start.
+public configuration file. The installer creates `.venv`, installs the CLI,
+server and a bundled FFmpeg binary via `imageio-ffmpeg`, then runs `npm ci`
+and builds the frontend. No system-wide FFmpeg installation is needed on
+supported Linux hosts. It never configures the printer or cloud credentials.
+Running tests and `status` does not request printer movement or print start.
 
 ## 2. Create the Access policy before publishing
 
@@ -67,8 +63,8 @@ Any partial configuration causes the service to reject startup.
 Run production with `--require-access` so missing configuration fails closed:
 
 ```bash
-# With environment file loaded and the .venv activated:
-ffadv4manager slicer --require-access
+# With the protected service environment loaded:
+./.venv/bin/ffadv4manager slicer --require-access
 ```
 
 If you use a systemd service, an example (adapt the absolute paths and service
